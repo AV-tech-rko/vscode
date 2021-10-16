@@ -1,0 +1,370 @@
+import os
+from re import A
+import subprocess
+import win32wnet
+import win32netcon
+from win32netcon import RESOURCETYPE_DISK
+import pyodbc
+import win32com.client
+import smtplib
+import configparser
+from configparser import ConfigParser
+from datetime import datetime
+from Standard import INI_IO
+import sys
+import pywintypes
+from Standard import ch
+import socket
+
+global JobTyp
+argument = int(sys.argv[1])
+JobTyp = [argument if argument.isnumeric() else 0]
+
+
+def Main():
+
+    AppPath = INI_IO("GLOBAL", "AppPath", os.path.basename(__file__), True,Pfad=None)
+    if AppPath =='':
+        AppPath=os.path.basename(__file__)
+
+    
+    AktDate = datetime.now()
+
+    server = INI_IO("GLOBAL", "Server", "EDPWDZ201", True)
+    database = INI_IO('GLOBAL', 'Database', 'NDE', True), 'mapcom', 'mapcom'
+    
+    connection = pyodbc.connect("Driver={SQLOLEDB};"
+                                "Server = server;"
+                                "Database =database ;"
+                                "Trusted_Connection=yes;")
+                                
+    print("S", "Start", "JobTyp = " + JobTyp)                            
+
+    neue_Verarbeitung()
+
+    print("S", "End", "JobTyp = " + JobTyp)
+    
+    connection.close()
+    return                            
+
+
+def alte_Verarbeitung():
+
+    NET = win32wnet.NETRESOURCE()
+    AktDate = datetime.now()
+    
+    try:
+        PathName = INI_IO("JobTyp" + JobTyp, "PathName", "", True,Pfad=None)
+        
+        LastDate = INI_IO("JobTyp" + JobTyp, "LastDate", 0, True,Pfad=None)
+
+        if INI_IO("JobTyp" + JobTyp, "NET_USE", 0, True,Pfad=None) == 1:
+            NET.dwType = win32netcon.RESOURCETYPE_DISK
+            NET.lpRemoteName = PathName
+
+            NET_UID = INI_IO("JobTyp" + JobTyp, "NET_UID", "", True,Pfad=None)
+            NET_PWD = INI_IO("JobTyp" + JobTyp, "NET_PWD", "", True,Pfad=None)
+
+           
+            try:
+                win32wnet.WNetAddConnection2(NET,NET_PWD,NET_UID,0)
+                print("S Connect to " + PathName)
+            except:
+                print("F Connect to " + PathName + " =  failed" )
+        #         return -1
+                
+        # else:
+        #     print("Network path unreachable")
+        #     return -1 
+        
+        AnzahlMinuten = INI_IO("JobTyp" + JobTyp, "Minuten", 60, True,Pfad=None)
+
+        if PathName == '':
+            print("F keine Verarbeitung für JobTyp = " + JobTyp)
+
+        STR = INI_IO("JobTyp" & JobTyp, "DirMask", "", True,Pfad=None)
+        if STR !='':
+            
+            DMA_Exists = True
+            FD = STR.split(",")     
+            DMA = ""
+            x=""
+
+            for n in range(0,FD):
+                DMA(x).Stufe = FD(n)              
+                n = n + 1
+                DMA(x).DirName = FD(n)
+                x = x + 1
+
+
+        STR = INI_IO("JobTyp" + JobTyp, "FileMask", "", True,Pfad=None)
+
+        if STR !='':
+            
+            FMA_Exists = True
+            FMA = STR.split(",")
+
+
+        n=1
+        
+        while 1:
+            STR = INI_IO("JobTyp" + JobTyp,"Folder" + n, "", True,Pfad=None)
+            if STR == '':
+                break
+                    
+                DNA[n].DirName = STR
+                DNA[n].Stufe = 1
+                n = n + 1
+                if DNA > 0:
+                    DNA_Exists = True    
+
+
+        SubDir = INI_IO("JobTyp" + JobTyp, "SubDir", 1, True,Pfad=None)
+
+        if SubDir==0:
+            onlyfiles = next(os.walk(PathName))[2] 
+            nooffiles = len(onlyfiles)
+            if nooffiles>0:
+                Read_Files(PathName)
+        elif SubDir==0:        
+            for root, dirs, files in os.walk(PathName):
+                for dir in dirs:
+                    os.chdir(PathName)
+                    list = os.listdir(dir)
+                    number_files = len(list)
+                    if number_files>0:
+                        Read_Folders(PathName,Stufe)
+        elif SubDir==2:
+            for root, dirs, files in os.walk(PathName):
+                for dir in dirs:
+                    os.chdir(PathName)
+                    list = os.listdir(dir)
+                    number_files = len(list)
+                    if number_files>0:
+                        Read_Folders(PathName,Stufe)
+
+            onlyfiles = next(os.walk(PathName))[2] 
+            nooffiles = len(onlyfiles)
+            if nooffiles>0:
+                Read_Files(PathName)            
+
+
+        if JobTyp==1:
+            if MText != '':
+                MText = 'Neue Datei ' + MText + ' vorhanden!'
+                OK = SMTP_senden(MText)
+
+        elif JobTyp==2:
+            if MText != '':
+                MText = 'Die aktuellen Reports aus der Daimler-Chrysler Helpdesk Reportgenerierung sind älter als ' + AnzahlMinuten + ' Minuten.\n\n' + 'Diese Meldung wird automatisch zu jeder vollen Stunde generiert, wenn die auf dem EDPWAZ103 gespeicherten Reports der DC-Helpdesk-Anwendung nicht aktuell erzeugt werden konnten.\n\nDie DC-Helpdesk-KPI-Reports werden ebenfalls auf dem EDPWAZ103 erzeugt.\n\nDie Generierung der Reports erfolgt über den Taskplaner gesteuert.\n\nBitte den Status der geplanten Task \'Helpdesk Reportgenerator\' überprüfen. (Start, Einstellungen, Systemsteuerung, Geplante Tasks)\n\n\nBei Problemen bitte Josef Müller (9379) informieren.'
+                SMTP_senden(MText)
+
+        else:
+            if MText != '':
+                MText = 'Dear data recipient, \n\n Please use the link below to download the data file(s):\n\n' + MText
+                OK = SMTP_senden(MText)
+
+        if OK:
+            INI_IO("JobTyp" + JobTyp, "LastDate", AktDate, False,Pfad=None)
+
+        if INI_IO("JobTyp" & JobTyp, "NET_USE", 0, True,Pfad=None) == 1:
+            if win32wnet.WNetCancelConnection2(NET.lpRemoteName, 0, 0) == 0:
+                print("S ", "Connection close")  
+            else:
+                print("F ", "Connection cant close") 
+
+    except:
+        print("F " +JobTyp + "Error")
+
+        if JobTyp==2:
+            MText == ("Die Überprüfung der Daimler-Chrysler Helpdesk Reportgenerierung kann nicht durchgeführt werden _"
+            + "da auf den Produktionsrechner SVR-ALTAIR8800 nicht zugegriffen werden kann.")
+            SMTP_senden(MText)
+            print("S", "Ende", "JobTyp = " + JobTyp)
+
+def neue_Verarbeitung():  
+
+    NET = win32wnet.NETRESOURCE()      
+    connection = pyodbc.connect("Driver={   };"
+                                "Server = ;"
+                                "Database = ;")
+
+    cursor_read = connection.cursor()
+    sql_query = cursor_read.execute("SELECT FROM FileWatch WHERE JobTyp = JobTyp")   
+    cursor_read.open(sql_query)                         
+    while not cursor_read.EOF:
+        if cursor_read.Fields("SubNo").Value == 0:
+            PathName = cursor_read.Fields("PathName").Value
+            LastDate = ch('NT0', cursor_read.Fields("LastDate").Value)
+            if cursor_read.Fields("NET_USE").Value != 0:
+                NET.dwType = win32netcon.RESOURCETYPE_DISK
+                NET.lpRemoteName = PathName
+
+                try:
+                    ret = win32wnet.WNetAddConnection2(NET, cursor_read.Fields("NET_PWD").Value, cursor_read.Fields("NET_UID").Value, 0)
+                    print('S ', 'Connect to ' + PathName)
+                except:             
+                    print('F ', 'Connect to ' + PathName + ' =  failed (' + ret + ')')
+                
+            
+        if PathName == '':
+            print('F','keine Verarbeitung für JobTyp = ' + JobTyp)
+            break
+    else:
+        cursor_read.MoveNext()
+        cursor_read.Close()
+
+def Read_Folders(Folder, Stufe):
+
+    SF = [name for name in os.listdir(Folder) if os.path.isdir(os.path.join(Folder, name))]
+    Stufe = Stufe + 1
+    try:
+        for Folder in SF:
+            OK = False
+            if (Folder == 'RECYCLER') or (Folder == 'RECYCLED') or (Folder == '.') or (Folder == '..'):
+                print("")
+            else:
+                if DMA_Exists:
+                    for n in range(0, DMA):
+                        if Stufe == DMA(n).Stufe:
+                            if ((Folder).upper()).str.contains((DMA(n).DirName).upper()):
+                                OK = True
+                                break
+                elif DNA_Exists:
+                    for n in range(1, DNA):
+                        if Stufe == DNA(n).Stufe:
+                            if (Folder).upper() == (DNA(n).DirName).upper():
+                                OK = True
+                        break
+                else:
+                    OK = True
+                if OK:
+                    for root, dirs, files in os.walk(Folder):
+                        for dir in dirs:
+                            os.chdir(Folder)
+                            list = os.listdir(dir)
+                            number_files = len(list)
+                            if number_files>0:
+                                Read_Folders(Folder, Stufe)
+                    onlyfiles = next(os.walk(Folder))[2] #dir is your directory path as string
+                    nooffiles = len(onlyfiles)
+                    if nooffiles>0:
+                        Read_Files(Folder)
+    except:
+        print("Error in folder")   
+
+def Read_Files(Folder):
+
+    vbCrLf=''    
+    try:
+        OK = True
+        
+        for root, dirs, files in os.walk(Folder):
+            for SFI in files:
+                if FMA_Exists:
+                    OK = False
+                    for n in range(0,FMA):
+                        if ((SFI.Name).upper()).str.contains(FMA(n).upper()):
+                            OK = True
+                
+                            break
+                now = datetime(SFI.DateLastModified)
+                target = datetime.now()
+                res = now - target
+                days = res.days
+                total_seconds = (now - target).total_seconds()
+                minutes = divmod(total_seconds,  60)[0]        
+                if OK:
+                    if JobTyp==1:
+                    
+                        if SFI.DateLastModified > LastDate:
+                            MText = MText + SFI.Name
+                            print("S ",  SFI.DateCreated +" - " + SFI.Path)
+                    elif JobTyp==2:
+
+                        if minutes > AnzahlMinuten:
+                            MText = "???"
+                            print("S ", SFI.DateLastModified + " - " + SFI.Path)     
+                    else:
+                        if SFI.DateCreated > LastDate:
+                            MText = MText + SFI.Path + vbCrLf
+                            print("S ", SFI.DateCreated + " - " + SFI.Path)
+    except:
+        print("error")
+
+
+def SMTP_senden(MText , Dateneingang):
+    ch1='@'
+
+    try:
+        MailServer = INI_IO("MAIL" + JobTyp, "MailServer", "mailhost.ihs.com", True,Pfad=None)
+        MailProvider = INI_IO("MAIL" + JobTyp, "MailProvider", "ihs.com", True,Pfad=None)
+        Domaine = "IHS"
+        MailFrom = "FileWatcher@ihs.com"
+        NameFrom = socket.gethostname() + " FileWatcher"
+        NameTo = ''
+        Eingang = ''
+
+        if Dateneingang is None:
+            Adressen = INI_IO("MAIL" + JobTyp, "ADRL", "", True,Pfad=None).split(";")
+        else:
+            Adressen = INI_IO("MAIL" & JobTyp, "ADRLPRTD", "", True).split(";")
+            Eingang = Dateneingang
+
+        if Adressen ==['']:
+            print("F",  "keine MAIL-Adressen vorhanden")   
+
+        MailText = MText
+
+        for n in Adressen:
+            if NameTo != '':
+                NameTo = NameTo + ";"    
+
+            if Adressen.find('@')==-1:
+                NameTo = NameTo + Adressen + "@" + MailProvider
+            else:
+                NameTo = NameTo + Adressen + "<" + Adressen + ">"
+
+        for n in Adressen:
+            Betreff = INI_IO("MAIL" + JobTyp+ "Betreff", "", True,Pfad=None)      
+        
+            if Eingang == "ERR":
+                Betreff = Betreff + " - PRTD-Files incorrect"
+        
+            if Adressen.find('@')==-1:
+                MailTo = Adressen + "@" + MailProvider
+            else:
+                MailTo = Adressen                                  
+                
+def WriteLog(Kat,Text1, Text2,FileName= "FW"):
+
+    ProtFile = AppPath + '\\' + FileName + Format(Date, 'dd') + '.log'
+
+    try:
+        Delete = True
+        FN = FreeFile
+
+        with open(ProtFile,"r") as fp:
+            Zeile = fp.read()
+            if Zeile is not None:
+                y= Zeile[6:]
+                m= Zeile[3:1]
+                d= Zeile[0:1]
+                dt_stamp = datetime.datetime(y, m, d)
+                Dat = dt_stamp.strftime('%m%Y')
+                today = datetime.date.today()
+                Date=today.strftime('%m%Y')
+
+                if Date != Dat:
+                    Delete = True
+
+            if Delete:
+                os.remove(ProtFile)
+    except:
+        with open(ProtFile,"a") as fp:
+
+
+            if len(Text1)<8:
+                Text1 = Text1 + str(8 - len(Text1), " ")
+            else:
+                Text1 = Text1[0:7]
